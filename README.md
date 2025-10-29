@@ -13,7 +13,7 @@ This based on the work by [T. Ritschel, et. al. and their 2009 paper "Temporal G
 
 ## Usage
 
- python -m fourier-glare -a <file>
+```python -m fourier-glare -a <file>```
 
 There are other flags supported (or intended to be supported), but that's the main way to do it. There are some sample aperture images you can play with in the `apertures` directory, but feel free to make your own!
 
