@@ -2,15 +2,22 @@ import math
 import numpy, OpenEXR, Imath, cv2
 
 class ImageUtils:
-	"""
-	Read in an EXR file at the supplied path and return the image data
-	as a dictionary of channel data
-
-	@param	string path
-	@return	dict
-	"""
 	@staticmethod
 	def readEXR(path):
+		"""
+		Read in an EXR file at the supplied path and return the image data
+		as a dictionary of channel data
+
+		Parameters
+		----------
+		path : string
+			Path to read the image from
+
+		Returns
+		-------
+		dict
+			Dictionary of image data, indexed by channel
+		"""
 		img = OpenEXR.InputFile(path)
 		header = img.header()
 		dw = header['dataWindow']
@@ -24,17 +31,21 @@ class ImageUtils:
 			img_data[c] = img_c
 		return img_data
 
-	"""
-	Write out an EXR file to the provided path, based on the supplied
-	dictionary of per-channel values, and an optional header dictionary
-
-	@param	string path
-	@param	dict channelData
-	@param	dict [optional] header
-	@return	void
-	"""
 	@staticmethod
 	def writeEXR(path, channelData, header = None):
+		"""
+		Write out an EXR file to the provided path, based on the supplied
+		dictionary of per-channel values, and an optional header dictionary
+
+		Parameters
+		----------
+		path : string
+			Where to write out the image
+		channelData : dict
+			The dictionary containing per-channel data
+		header : dict (optional)
+			Additional header data to write out
+		"""
 		if header is None:
 			channels = list(channelData.keys())
 			shape = channelData[channels[0]].shape
@@ -49,7 +60,7 @@ class ImageUtils:
 		print("Writing out %s" % path)
 		for c in channelData.keys():
 			realData = numpy.real(channelData[c])
-			print("\tMax/min for channel %s real values: %s / %s" % (c, numpy.max(realData), numpy.min(realData)))
+			# print("\tMax/min for channel %s real values: %s / %s" % (c, numpy.max(realData), numpy.min(realData)))
 			try:
 				toFloat32 = realData.astype(numpy.float32, casting='unsafe') # Allow to clamp to max value of format
 			except RuntimeWarning:
@@ -67,21 +78,30 @@ class ImageUtils:
 		exr.close()
 		print("Written")
 
-	"""
-	Given a single channel's worth of data and numeric values for
-	X and Y axis padding, pad the channel data by the indicated amount.
-
-	If X and Y are fractional values, the floor value will be used for
-	the negative dimension and the ceil value will be used for the
-	positive.
-
-	@param	ndarray channelData
-	@param	float padX
-	@param	float padY
-	@return	ndarray
-	"""
 	@staticmethod
 	def pad(channelData, padX, padY):
+		"""
+		Given a single channel's worth of data and numeric values for
+		X and Y axis padding, pad the channel data by the indicated amount.
+
+		If X and Y are fractional values, the floor value will be used for
+		the negative dimension and the ceil value will be used for the
+		positive.
+
+		Parameters
+		----------
+		channelData : ndarray
+			One channel's worth of image data
+		padX : float
+			Amount by which to pad in the X direction
+		padY : float
+			Amount by which to pad in the Y direction
+
+		Returns
+		-------
+		ndarray
+			The padded channel data
+		"""
 		if (padX == 0 and padY == 0): # Noop
 			return channelData
 		padX = [int(x) for x in [math.floor(padX), math.ceil(padX)]]
@@ -98,37 +118,57 @@ class ImageUtils:
 			channelData = numpy.pad(channelData, ((padY[0], padY[1]), (padX[0], padX[1])))
 		return channelData
 
-	"""
-	Given a current size and a target size, choose the best
-	interpolation method to use when scaling
-
-	@param	iterable currentSize
-	@param	iterable targetSize
-	@return	cv2 constant
-	"""
 	@staticmethod
 	def chooseInterpolation(currentSize, targetSize):
+		"""
+		Given a current size and a target size, choose the best
+		interpolation method to use when scaling
+
+		Parameters
+		----------
+		currentSize | iterable
+			The current image size
+		targetSize | iterable
+			The target image size
+
+		Returns
+		-------
+		int
+			cv2 constant corresponding to the identified interpolation
+		"""
 		interp = cv2.INTER_CUBIC
 		# If both axes are being reduced, switch to AREA
 		#if (currentSize[0] > targetSize[0] and currentSize[1] > targetSize[1]):
 		#	interp = cv2.INTER_AREA
 		return interp
 
-	"""
-	Given a single channel's data, pad and resize the data based on
-	supplied values. An optional parameter indicates whether or not
-	to pad first, then resize (default) or to resize first, then pad.
-
-	@param	ndarray channelData
-	@param	float padX
-	@param	float padY
-	@param	float sizeX
-	@param	float sizeY
-	@param	bool [optional] padFirst
-	@return	ndarray
-	"""
 	@staticmethod
 	def padAndResize(channelData, padX, padY, sizeX, sizeY, padFirst = True):
+		"""
+		Given a single channel's data, pad and resize the data based on
+		supplied values. An optional parameter indicates whether or not
+		to pad first, then resize (default) or to resize first, then pad.
+
+		Parameters
+		----------
+		channelData : ndarray
+			N-D Array of channel data
+		padX : float
+			Amount by which to pad in the X axis
+		padY : float
+			Amount by which to pad in the Y axis
+		sizeX : float
+			Target X-axis size for the returned result
+		sizeY : float
+			Target Y-axis size for the returned result
+		padFirst : bool (optional)
+			Whether or not we pad first (default) or resize first
+
+		Returns
+		-------
+		ndarray
+			The resized and padded channel data
+		"""
 		sizeX = int(sizeX)
 		sizeY = int(sizeY)
 		if padFirst:
@@ -143,7 +183,8 @@ class ImageUtils:
 
 	@staticmethod
 	def pixel_to_uv(x, dimension):
-		"""Convert a pixel column/row value to a fractional U/V value
+		"""
+		Convert a pixel column/row value to a fractional U/V value
 		based on the supplied maximum dimension
 
 		Parameters
@@ -160,17 +201,26 @@ class ImageUtils:
 		"""
 		return (float(x) / float(dimension - 1.) - 0.5) * 2.
 
-	"""
-	Convert a cv2-formatted ndarray of image data into a per-channel
-	dictionary of ndarrays
-
-	@param	ndarray image
-	@param	bool [optional] includeAlpha
-	@param	bool [optional] normalize
-	@return	dict
-	"""
 	@staticmethod
 	def cvToDict(image, includeAlpha = False, normalize = True):
+		"""
+		Convert a cv2-formatted ndarray of image data into a per-channel
+		dictionary of ndarrays
+
+		Parameters
+		----------
+		image : ndarray
+			The image to be converted
+		includeAlpha : bool (optional)
+			Whether or not to include the Alpha channel in the returned result
+		normallize : bool (optional)
+			Whether or not to normalize the values (from 0-255 to 0-1)
+
+		Returns
+		-------
+		dict
+			Dictionary of color values
+		"""
 		channelMapping = {'R': 0, 'G': 1, 'B': 2, 'A': 3}
 		dimensions = image.shape[0:2]
 		channels = len(image[0][0])
@@ -193,15 +243,22 @@ class ImageUtils:
 				raise Exception("Channel data should not be none for channel %s" % c)
 		return imDict
 
-	"""
-	Given an dictionary of per-channel data, convert it to a 3-array
-	instead, for use with cv2 functions.
-
-	@param	dict imDict
-	@return	ndarray
-	"""
 	@staticmethod
 	def dictToCv(imDict):
+		"""
+		Given an dictionary of per-channel data, convert it to a 3-array
+		instead, for use with cv2 functions.
+
+		Parameters
+		----------
+		imDict : dict
+			The dictionary representation of the image to be converted
+
+		Returns
+		-------
+		ndarray
+			The N-D array image representation CV2 wants
+		"""
 		channels = len(imDict.keys())
 		shape = list(list(imDict.values())[0].shape)
 		shape.append(channels)
@@ -215,5 +272,3 @@ class ImageUtils:
 					cIdx = cIdxMap[c]
 					image[y][x][cIdx] = imDict[c][y][x]
 		return image
-
-

@@ -4,9 +4,10 @@ import numpy, cv2
 
 class ColorUtils:
 	cmf = {}
+	swap_image = None
 
 	@staticmethod
-	def get_rgb_from_wavelength(l, fake_image):
+	def get_rgb_from_wavelength(l):
 		"""
 		Given a wavelength and a 1x1x3 ndarray, determine the XYZ color
 		value for that wavelength, assign those values to the ndarray,
@@ -26,9 +27,11 @@ class ColorUtils:
 			A 3-value list of RGB factors
 		"""
 		xyz = ColorUtils.lamba_to_xyz(l)
-		fake_image[0][0] = xyz
-		rgb = cv2.cvtColor(fake_image, cv2.COLOR_XYZ2RGB)
-		return rgb[0][0]
+		if ColorUtils.swap_image is None:
+			ColorUtils.swap_image = numpy.ndarray((1, 1, 3), dtype=numpy.float32) # Trivial image used to get color values
+		ColorUtils.swap_image[0][0] = xyz
+		rgb = cv2.cvtColor(ColorUtils.swap_image, cv2.COLOR_XYZ2RGB)
+		return {"R": rgb[0][0][0], "G": rgb[0][0][1], "B": rgb[0][0][2]}
 
 	@staticmethod
 	def lamba_to_xyz(l):

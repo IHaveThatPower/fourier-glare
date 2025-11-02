@@ -23,6 +23,8 @@ class ApertureGlareFFT:
 	FILENAME_CHROMATIC_PSF_PATTERN = "chromatic_psf_%s.exr"
 	DEFAULT_APERTURE_PATH = os.path.join(os.path.dirname(__file__), "apertures/fft_aperture_octround_very-dirty.png")
 
+	REF_WAVELENGTH_TIMES_APERTURE_DISTANCE = 0.25 # Used in computing the E-kernel and the K scaling factor
+
 	# Various setters
 
 	def setAperture(self, aperturePath):
@@ -202,10 +204,12 @@ class ApertureGlareFFT:
 		except Exception as e:
 			print("\t", e)
 			print("\tComputing E fresh")
+			# See docblock above about the "q" value, computed here as ld
 			# l = 575. * 1e-9 # Assume wavelength l is 575 nm
 			# d = 8. * 1e-3 # Assume pupil distance d is 8mm
 			# d = 8. * 1e10 # Arbitrarily chosen
-			ld = 0.25 # Wavelength * distance from aperture to sensor
+			# TODO: Explore this in more detail. Why are the physical values so unintuitive?
+			ld = ApertureGlareFFT.REF_WAVELENGTH_TIMES_APERTURE_DISTANCE # Wavelength * distance from aperture to sensor
 			w = (1j*math.pi)/(ld)
 			E_helper = numpy.ndarray((self.SCALE_FRESNEL_KERNEL, self.SCALE_FRESNEL_KERNEL), dtype=numpy.complex128)
 			for y in range(0, self.SCALE_FRESNEL_KERNEL):
@@ -235,6 +239,14 @@ class ApertureGlareFFT:
 	# PSF Generation
 
 	def generatePSF(self, wavelengthStep = 5):
+		"""
+		Generate the PSF from the aperture
+
+		Parameters
+		----------
+		wavelengthStep : int
+			Number of steps to use when computing per-wavelength PSFs
+		"""
 		self.mutateAperture()
 		self.computeAperturePSF()
 		self.chromaticScalePSF(stepSize = wavelengthStep)
@@ -268,7 +280,7 @@ class ApertureGlareFFT:
 			print("\tGenerating monochromatic FT from channel %s" % c)
 			self.psf[c] = numpy.fft.fft2(self.apertureData[c], norm="ortho")
 			self.psf[c] = numpy.abs(numpy.fft.fftshift(self.psf[c]))
-			self.psf[c] = self.psf[c]**2
+			self.psf[c] = self.psf[c]**2 * (1. / ApertureGlareFFT.REF_WAVELENGTH_TIMES_APERTURE_DISTANCE**2) # This is the "K" scale factor
 			print("\t...done")
 		ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), "baseAperture.exr"), self.psf)
 		print("...done")
@@ -286,41 +298,28 @@ class ApertureGlareFFT:
 		"""
 		print("Applying chromatic scaling to PSF")
 		self.psf_out = dict()
-		key_map = {'R': 0, 'G': 1, 'B': 2}
-		fake_image = numpy.ndarray((1, 1, 3), dtype=numpy.float32) # Trivial image used to get color values
 		numSteps = math.floor((self.WAVELENGTH_HIGH+1 - self.WAVELENGTH_LOW) / stepSize)
 		print("\tNum Steps: %s" % numSteps)
 		for l in range(self.WAVELENGTH_LOW, self.WAVELENGTH_HIGH+1, stepSize): # Evaluate wavelengths in stepSize nm hops
-			print("\tComputing wavelength", l)
-			rgb_factors = ColorUtils.get_rgb_from_wavelength(l, fake_image)
-			# print("RGB equivalent is", rgb_factors)
+			print("\tComputing wavelength %snm" % (l))
+			# Wavelength-based scaling factor
+			# TODO: According to Ritschel 2009, this should be 575 / l, but that results in blue being the "outer" value,
+			# which doesn't match their actual results. Flipping it to l / 575 results in expected results. Why?
+			scale_factor = float(l) / float(self.WAVELENGTH_MID) # float(self.WAVELENGTH_MID) / float(l)
+			# PSF dimensions when scaled by this factor
+			scale_dim = [round(s * scale_factor) for s in self.psf['R'].shape]
+			# Amount by which to crop resulting scaled image to keep it the same size as the base PSF size
+			crop_amount = [(dim - scale) * 0.5 for (dim, scale) in zip(self.psf['R'].shape, scale_dim)]
+			# Spectral factors for this wavelength, as RGB values
+			spectral_rgb = ColorUtils.get_rgb_from_wavelength(l)
 
-			# Determine amount by which to scale the image and then pad or crop it to maintain size
-			# TODO: This isn't really the right way to do this; we should be sampling different values based on intensity. This works well enough as a starter, though.
-			scale = float(l) / float(self.WAVELENGTH_MID)
-			scaleSize = [round(s * scale) for s in self.psf['R'].shape]
-			cropAmount = [dim - scale for (dim, scale) in zip(self.psf['R'].shape, scaleSize)]
-			cropAmount = [c * 0.5 for c in cropAmount]
-
-			# Iterate over the channels in the PSF
+			# Apply to each channel in the base PSF
 			for c in self.psf.keys():
-				if (c not in self.psf_out.keys()):
+				if (c not in self.psf_out.keys()): # Initialize the channel
 					self.psf_out[c] = numpy.zeros((self.psf[c].shape[1], self.psf[c].shape[0]), dtype=numpy.complex128)
-				self.psf_scaled = ImageUtils.padAndResize(self.psf[c], cropAmount[1], cropAmount[0], scaleSize[1], scaleSize[0], False)
-				self.psf_scaled *= rgb_factors[key_map[c]]
-				addToPSF = numpy.multiply(self.psf_scaled, 1. / float(l)) # / numSteps # TODO: Should we be scaling by the number of slices here, or are we already intrinsically doing that?
-				self.psf_out[c] += addToPSF
-
-				writeOutEXRs = False # Toggle to debug
-				if writeOutEXRs:
-					exrPath = os.path.join(os.path.realpath(self.PATH_TMP_FILES), self.FILENAME_CHROMATIC_PSF_PATTERN) % l
-					if (os.path.isfile(exrPath)):
-						existingData = ImageUtils.readEXR(exrPath)
-					else:
-						existingData = dict()
-					existingData[c] = self.psf_scaled
-					ImageUtils.writeEXR(exrPath, existingData)
-			print("\t...done")
+				self.psf_scaled = ImageUtils.padAndResize(self.psf[c], crop_amount[1], crop_amount[0], scale_dim[1], scale_dim[0], False)
+				self.psf_scaled *= spectral_rgb[c]
+				self.psf_out[c] += self.psf_scaled
 		# DEBUG
 		ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), 'chromatic_psf.exr'), self.psf_out)
 		self.psf = self.psf_out
@@ -331,56 +330,23 @@ class ApertureGlareFFT:
 		Normalize the PSF across all channels
 		"""
 		print("Normalizing chromatic PSF")
-		self.normalizePSFbyChannel()
-		self.normalizePSFtoUnit()
-
+		self.normalizePSFChannelsToUnit()
 		psfNormalizedPath = os.path.join(os.path.realpath(self.PATH_TMP_FILES), self.FILENAME_PSF_NORMALIZED)
 		ImageUtils.writeEXR(psfNormalizedPath, self.psf)
 		print("...done")
 
-	def normalizePSFbyChannel(self):
+	def normalizePSFChannelsToUnit(self):
 		"""
-		Find the largest value across all channels and scale the other
-		channels by so that they each have that value
+		Compute the total value of each channel in the PSF and scale
+		it down so that it equals 1
 		"""
-		print("\tScaling values")
-		psfMax = {c: numpy.max(self.psf[c]) for c in self.psf.keys()}
-		psfMaxVal = numpy.amax(list(psfMax.values()))
-		psfNormFactor = {c: numpy.divide(psfMaxVal, psfMax[c]) for c in psfMax.keys()}
 		for c in self.psf.keys():
-			print("\t\tScaling %s by:" % c, psfNormFactor[c])
-			self.psf[c] = numpy.multiply(self.psf[c], psfNormFactor[c])
-		print("\t...done")
-
-	# EXPERIMENTAL
-	def normalizePSFbyChannelMean(self):
-		"""
-		An experiment normalizing each channel by the largest mean value
-		across all channels.
-		"""
-		print("\tScaling values")
-		# psfPrescalePath = os.path.join(os.path.realpath(self.PATH_TMP_FILES), self.FILENAME_PSF_PRESCALE)
-		# ImageUtils.writeEXR(psfPrescalePath, self.psf)
-		psfMean = {c: numpy.mean(self.psf[c]) for c in self.psf.keys()}
-		psfMaxMeanVal = numpy.amax(list(psfMean.values()))
-		psfNormFactor = {c: numpy.divide(psfMaxMeanVal, psfMean[c]) for c in psfMean.keys()}
-		for c in self.psf.keys():
-			print("\t\tScaling %s by:" % c, psfNormFactor[c])
-			self.psf[c] = numpy.multiply(self.psf[c], psfNormFactor[c])
-		print("\t...done")
-
-	def normalizePSFtoUnit(self):
-		"""
-		Normalize the PSF to unit values, so as to not introduce
-		improper pixel magnitude scaling
-		"""
-		print("\tNormalizing to unit")
-		psfScaleFactor = {c: numpy.max(self.psf[c]) for c in self.psf.keys()}
-		psfMaxScale = numpy.amax(list(psfScaleFactor.values()))
-		for c in self.psf.keys():
-			self.psf[c] = numpy.divide(self.psf[c], psfMaxScale)
-		print("\t...done")
-
+			psf_sum = numpy.sum(self.psf[c])
+			psf_unit = self.psf[c].shape[1] * self.psf[c].shape[0]
+			psf_scale = psf_unit / psf_sum
+			print("\tScaling PSF %s-channel by %s" % (c, psf_scale))
+			self.psf[c] *= psf_scale
+			print("\t...done")
 
 	# Image Diffraction
 
@@ -388,7 +354,6 @@ class ApertureGlareFFT:
 		"""
 		Perform our FFTs and generate our diffracted image
 		"""
-		# TODO: Break this up into smaller methods
 		diffData = dict()
 		fftRealData = dict()
 		fftImaginaryData = dict()
@@ -397,29 +362,16 @@ class ApertureGlareFFT:
 		print("Beginning per-channel FFT")
 		for c in ['R', 'G', 'B']:
 			print("\tWorking on channel %s" % c)
-
-			print("\t\tScaling Aperture Image")
-			imageScaleRealPSF = ImageUtils.padAndResize(numpy.real(self.psf[c]), 0, 0, self.SCALE_WORK, self.SCALE_WORK)
-			imageScaleImagPSF = ImageUtils.padAndResize(numpy.imag(self.psf[c]), 0, 0, self.SCALE_WORK, self.SCALE_WORK)
-			imageScalePSF = imageScaleRealPSF + 1j*imageScaleImagPSF
-			scaledAperture[c] = imageScalePSF
-			print("\t\t...done")
+			scaledAperture[c] = self.scaleApertureForDiffraction(self.psf[c])
 
 			print("\t\tComputing FFTs")
-			fftAperture[c] = numpy.fft.fft2(imageScalePSF, norm="ortho")
+			fftAperture[c] = numpy.fft.fft2(scaledAperture[c], norm="ortho")
 			fftImage = numpy.fft.fft2(self.imageData[c], norm="ortho")
 			fftRealData[c] = numpy.real(fftImage)
 			fftImaginaryData[c] = numpy.imag(fftImage)
 			print("\t\t...done")
 
-			print("\t\tComputing diffracted channel %s" % c)
-			diffData[c] = numpy.multiply(fftAperture[c], fftImage)
-			diffData[c] = numpy.fft.ifft2(diffData[c], norm="ortho")
-			diffData[c] = numpy.fft.fftshift(diffData[c])
-			# ifftImageData[c] = numpy.fft.ifft2(fftImage, norm="ortho")
-			# ifftImageData[c] = numpy.fft.fftshift(ifftImageData[c])
-			print("\t\t...done")
-
+			diffData[c] = self.computeDiffractedChannel(fftAperture[c], fftImage)
 			print("\t...done")
 		print("...done computing FFT and IFFT")
 		ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), "fftAperture_real.exr"), {c: numpy.real(fftAperture[c]) for c in fftAperture})
@@ -428,11 +380,57 @@ class ApertureGlareFFT:
 		ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), "scaledAperture_imag.exr"), {c: numpy.imag(scaledAperture[c]) for c in scaledAperture})
 
 		print("Writing diffraction image")
-		for c in diffData.keys():
-			diffData[c] = numpy.abs(diffData[c])
-			diffData[c] = ImageUtils.padAndResize(diffData[c], -self.padX, -self.padY, (self.iSize[1] + self.padX * 2), (self.iSize[0] + self.padY * 2), False)
 		diffractionPath = os.path.join(os.path.realpath(self.PATH_TMP_FILES), self.FILENAME_DIFFRACTION_IMAGE)
 		ImageUtils.writeEXR(diffractionPath, diffData)
 		ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), "image-fft_real.exr"), fftRealData);
 		ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), "image-fft_imag.exr"), fftImaginaryData);
 		print("...done")
+
+	def scaleApertureForDiffraction(self, channel_psf):
+		"""
+		Scale the aperture image prior to diffracting it
+
+		Returns
+		-------
+		ndarray
+			Scaled N-D array equal to the work scale, from the PSF for the channel
+		"""
+		print("\t\tScaling Aperture Image")
+		imageScaleRealPSF = ImageUtils.padAndResize(numpy.real(channel_psf), 0, 0, self.SCALE_WORK, self.SCALE_WORK)
+		imageScaleImagPSF = ImageUtils.padAndResize(numpy.imag(channel_psf), 0, 0, self.SCALE_WORK, self.SCALE_WORK)
+		imageScalePSF = imageScaleRealPSF + 1j*imageScaleImagPSF
+		return imageScalePSF
+		print("\t\t...done")
+
+	def computeDiffractedChannel(self, fftAperture, fftImage):
+		"""
+		Convolve an image by using a supplied FFT of the image and
+		a supplied FFT of the convolution PSF
+
+		Parameters
+		----------
+		fftAperture : ndarray
+			The PSF FFT
+		fftImage : ndarray
+			The image FFT
+
+		Returns
+		-------
+		ndarray
+			The convolved channel data
+		"""
+		print("\t\tComputing diffracted channel %s" % c)
+		# Multiply FFT of image by FFT of aperture
+		diffData = numpy.multiply(fftAperture, fftImage)
+		# IFFT & FFT Shift
+		diffData = numpy.fft.ifft2(diffData, norm="ortho")
+		diffData = numpy.fft.fftshift(diffData)
+
+		# Take the absolute value of the result
+		diffData = numpy.abs(diffData)
+
+		# Scale the resulting data back down toe the original size
+		diffData = ImageUtils.padAndResize(diffData, -self.padX, -self.padY, (self.iSize[1] + self.padX * 2), (self.iSize[0] + self.padY * 2), False)
+
+		print("\t\t...done")
+		return diffData
