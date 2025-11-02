@@ -290,7 +290,6 @@ class ApertureGlareFFT:
 		fake_image = numpy.ndarray((1, 1, 3), dtype=numpy.float32) # Trivial image used to get color values
 		numSteps = math.floor((self.WAVELENGTH_HIGH+1 - self.WAVELENGTH_LOW) / stepSize)
 		print("\tNum Steps: %s" % numSteps)
-		firstStep = True
 		for l in range(self.WAVELENGTH_LOW, self.WAVELENGTH_HIGH+1, stepSize): # Evaluate wavelengths in stepSize nm hops
 			print("\tComputing wavelength", l)
 			rgb_factors = ColorUtils.get_rgb_from_wavelength(l, fake_image)
@@ -307,30 +306,10 @@ class ApertureGlareFFT:
 			for c in self.psf.keys():
 				if (c not in self.psf_out.keys()):
 					self.psf_out[c] = numpy.zeros((self.psf[c].shape[1], self.psf[c].shape[0]), dtype=numpy.complex128)
-				# print("\t\tMax/min of psf[%s]: %s, %s" % (c, numpy.max(self.psf[c]), numpy.min(self.psf[c])))
-				# print("\t\tMax/min of psf_out[%s]: %s, %s" % (c, numpy.max(self.psf_out[c]), numpy.min(self.psf_out[c])))
-				# if (firstStep):
-				# 	print("\t\tThe above values should be 0!")
 				self.psf_scaled = ImageUtils.padAndResize(self.psf[c], cropAmount[1], cropAmount[0], scaleSize[1], scaleSize[0], False)
-				# print("\t\tMax/min of psf_scaled for %s: %s, %s" % (c, numpy.max(self.psf_scaled), numpy.min(self.psf_scaled)))
-				# ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), 'psf_scaled_%s_%s.exr' % (l, c)), {c: self.psf_scaled})
 				self.psf_scaled *= rgb_factors[key_map[c]]
-				# print("\t\tSize of psf_scaled: %s, %s" % (self.psf_scaled.shape[1], self.psf_scaled.shape[0]))
-				# print("\t\tMax/min of psf_scaled * rgb factors for %s: %s, %s" % (c, numpy.max(self.psf_scaled), numpy.min(self.psf_scaled)))
-				# ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), 'psf_scaled_rgbfac_%s_%s.exr' % (l, c)), {c: self.psf_scaled})
-				# print("\t\tMultiplying all values by %s" % (1. / float(l)))
-				# TODO: Something about this operation is going awry
 				addToPSF = numpy.multiply(self.psf_scaled, 1. / float(l)) # / numSteps # TODO: Should we be scaling by the number of slices here, or are we already intrinsically doing that?
-				# print("\t\tCurrent psf_out max for %s: %s" % (c, numpy.max(self.psf_out[c])))
-				# print("\t\tMax amount to add to that: %s" % (numpy.max(addToPSF)))
-				#try:
 				self.psf_out[c] += addToPSF
-				#except RuntimeWarning:
-
-					# print("\t\tCurrent value for %s: %s" % (c, self.psf_out[c]))
-					# print("\t\tValue by which to adjust it: %s" % (numpy.multiply(self.psf_scaled, 1. / float(l))))
-				#	exit()
-				# ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), 'psf_out_%s_%s.exr' % (l, c)), self.psf_out)
 
 				writeOutEXRs = False # Toggle to debug
 				if writeOutEXRs:
@@ -342,9 +321,6 @@ class ApertureGlareFFT:
 					existingData[c] = self.psf_scaled
 					ImageUtils.writeEXR(exrPath, existingData)
 			print("\t...done")
-			# ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), 'scaled_psf_%s.exr' % l), self.psf_out)
-			# ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), 'psf_diag_%s.exr' % (l)), scaledDiagnosticPSF)
-			firstStep = False
 		# DEBUG
 		ImageUtils.writeEXR(os.path.join(os.path.realpath(self.PATH_TMP_FILES), 'chromatic_psf.exr'), self.psf_out)
 		self.psf = self.psf_out

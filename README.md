@@ -17,7 +17,7 @@ This based on the work by [T. Ritschel, et. al. and their 2009 paper "Temporal G
 
 There are other flags supported (or intended to be supported), but that's the main way to do it. There are some sample aperture images you can play with in the `apertures` directory, but feel free to make your own!
 
-Generate files will appear in a directory called `tmp` that, by default, lives inside the module directory. You can override this with a command line switch as desired.
+Generated files will appear in a directory called `tmp` that, by default, lives inside the module directory. You can override this with a command line switch as desired.
 
 The output result that can be used as a PSF for the Convolve node in the Blender Compositor will be called `chromatic_psf.exr` or `PSF_normalized.exr`, depending on your preference. If you use the former, you will likely need to dial the intensity way down, but you may lose some detail in using `PSF_normalized.exr`.
 
