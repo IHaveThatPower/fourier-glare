@@ -343,7 +343,7 @@ class ApertureGlareFFT:
 		for c in self.psf.keys():
 			psf_sum = numpy.sum(self.psf[c])
 			psf_unit = self.psf[c].shape[1] * self.psf[c].shape[0]
-			psf_scale = psf_unit / psf_sum
+			psf_scale = 1. / psf_sum
 			print("\tScaling PSF %s-channel by %s" % (c, psf_scale))
 			self.psf[c] *= psf_scale
 			print("\t...done")
